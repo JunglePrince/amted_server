@@ -37,30 +37,6 @@ using namespace std;
 //   }
 //   return 0;
 // }
-//
-// int parse_input() {
-//   string line;
-//   while(std::getline(std::cin, line)) {
-//     list<string> argv;
-//     split(argv, line, is_any_of("|"));
-//     int size = argv.size();
-//     char* argvv[size][512];
-//     for (int i = 0; i < size; i++) {
-//       char* line = strdup(argv[i].c_str());
-//       int j = 0;
-//       for (argvv[i][j] = strtok(line," "); argvv[i][j] != NULL; argvv[i][++j] = strtok(NULL, " ")) {
-//         int pds[size-1][2];
-//         exec_pipes(argvv, pds, 0, size);
-//         for (int i = 0; i < size; i++) {
-//           for (int j = 0; j < 512; j++) {
-//             free(argvv[i][j]);
-//           }
-//           free(argvv[i]);
-//         }
-//     free(argvv);
-//   }
-//   return 0;
-// }
 
 /**
  * Splits input into a list of tokens on the supplied separator.
@@ -81,8 +57,7 @@ list<string> tokenize(string input, string separator) {
 }
 
 /**
- * Takes a line of shell input and splits it into a list of
- * commands -> list of arguments
+ * Takes a line of shell input and splits it into a list of commands.
  */
 list<string> parseCommands(string input) {
   list<string> commands = tokenize(input, "|");
