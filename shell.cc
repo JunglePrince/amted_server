@@ -1,7 +1,10 @@
-#include <string>
 #include <iostream>
+#include <list>
+#include <string>
+#include <utility>
+
 #include <sys/wait.h>
-#include <vector>
+
 using namespace std;
 
 // int exec_pipes(char* argvv[][512], int pds[][2], int index, int size) {
@@ -38,7 +41,7 @@ using namespace std;
 // int parse_input() {
 //   string line;
 //   while(std::getline(std::cin, line)) {
-//     vector<string> argv;
+//     list<string> argv;
 //     split(argv, line, is_any_of("|"));
 //     int size = argv.size();
 //     char* argvv[size][512];
@@ -60,20 +63,45 @@ using namespace std;
 // }
 
 /**
- * Splits input into a vector of tokens on the supplied separator.
+ * Splits input into a list of tokens on the supplied separator.
  */
-vector<string> tokenize(string input, string separator) {
-  vector<string> tokens;
+list<string> tokenize(string input, string separator) {
+  list<string> tokens;
   int prev = 0;
   int next = 0;
   while (prev != string::npos) {
     int position = input.find(separator, next);
     string token = input.substr(next, position - next);
-    tokens.push_back(token);
+    if (!token.empty())
+      tokens.push_back(token);
     prev = position;
     next = position + 1;
   }
   return tokens;
+}
+
+/**
+ * Takes a line of shell input and splits it into a list of
+ * commands -> list of arguments
+ */
+list<pair<string, list<string> > > parseCommands(string input) {
+  list<string> commands = tokenize(input, "|");
+  list<pair<string, list<string> > > output;
+  list<string>::iterator it;
+  for (it = commands.begin(); it != commands.end(); it++) {
+    // Tokenize the command and arguments
+    string commandAndArgs = *it;
+    list<string> args = tokenize(commandAndArgs, " ");
+    // If there is no command, abort
+    if (commandAndArgs.empty()) {
+      continue;
+    }
+    // Remove the command from the arglist
+    string command = args.front();
+    args.pop_front();
+    output.push_back(make_pair(command, args));
+  }
+  return output;
 }
 
 int main(int argc, char* argv[]) {
@@ -81,12 +109,20 @@ int main(int argc, char* argv[]) {
 
   string input;
   while (getline(cin, input)) {
-    vector<string> commands = tokenize(input, "|");
-    vector<string>::iterator it;
-    cout << "Commands: ";
-    for (it = commands.begin(); it < commands.end(); it++) {
-      cout << "\"" << *it << "\", ";
+    list<pair<string, list<string> > > commands = parseCommands(input);
+    list<pair<string, list<string> > >::iterator it;
+    for (it = commands.begin(); it != commands.end(); it++) {
+      string command = it->first;
+      list<string> args = it->second;
+
+      cout << "Command: " << command << "\n";
+      cout << "Arguments: ";
+      list<string>::iterator argit;
+      for (argit = args.begin(); argit != args.end(); argit++) {
+        cout << *argit << " ";
+      }
+      cout << "\n";
     }
-    cout << "\n$ ";
+    cout << "$ ";
   }
 }
