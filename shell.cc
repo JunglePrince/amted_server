@@ -1,13 +1,10 @@
+#include <iostream>
+
+#include <string.h>
+#include <stdio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-#include <cstring>
-#include <cstdio>
-#include <iostream>
-#include <string>
-#include <utility>
-#include <vector>
 
 using namespace std;
 
@@ -47,57 +44,69 @@ void printErrno() {
 }
 
 /**
- * Splits input into a vector of tokens on the supplied separator.
+ * Splits input into a array of tokens on the supplied delimiter.
  */
-vector<string> tokenize(string input, string separator) {
-  vector<string> tokens;
-  size_t prev = 0;
-  int next = 0;
-  while (prev != string::npos) {
-    int position = input.find(separator, next);
-    string token = input.substr(next, position - next);
-    if (!token.empty())
-      tokens.push_back(token);
-    prev = position;
-    next = position + 1;
+char** tokenize(char* input, const char* delimiter) {
+  size_t argmax = 64;
+  char** tokens = (char**) calloc(argmax + 1, sizeof(char*));
+  if (tokens == NULL) {
+    return NULL;
+  }
+  char* token = strtok(input, delimiter);
+  size_t i = 0;
+  while (token != NULL) {
+    if (strlen(token) == 0)
+      continue;
+    tokens[i] = token;
+    i++;
+    token = strtok(NULL, delimiter);
+    if (i == argmax)
+      break;
   }
   return tokens;
 }
 
 /**
- * Takes a line of shell input and splits it into a vector of vectors containing
- * the command and the command line arguments.
+ * Takes a line of shell input and splits it into an array of arrays containing
+ * the commands and their command line arguments.
  */
-vector<vector<string> > parseCommands(string input) {
-  vector<string> rawCommands = tokenize(input, "|");
-  vector<vector<string> > output;
-  vector<string>::iterator it;
-  for (it = rawCommands.begin(); it != rawCommands.end(); it++) {
-    // Tokenize the command and arguments
-    string rawCommand = *it;
-    vector<string> command = tokenize(rawCommand, " ");
-    // If there is no command, abort
-    if (command.empty()) {
+char*** parseCommands(char* input) {
+  char** rawCommands = tokenize(input, "|");
+  if (rawCommands == NULL)
+    return NULL;
+
+  int count = 0;
+  while (rawCommands[count] != NULL)
+    count++;
+
+  if (count == 0)
+    return NULL;
+
+  char*** commands = (char***) calloc(count, sizeof(char**));
+  int i = 0;
+  while (rawCommands[i] != NULL) {
+    char* command = rawCommands[i];
+    char** commandArgs = tokenize(command, " ");
+
+    if (commandArgs == NULL)
       continue;
-    }
-    output.push_back(command);
+    if (commandArgs[0] == NULL)
+      continue;
+
+    commands[i] = commandArgs;
+    i++;
   }
-  return output;
+
+  free(rawCommands);
+  return commands;
 }
 
-void runCommands(vector<vector<string>> commands) {
+void runCommands(char*** commands) {
   pid_t pid = fork();
   if (pid == 0) {
     // Child process
-    vector<string> command = commands.front();
-    // Convert arguments into C string array
-    char* args[commands.size()];
-    size_t i;
-    for (i = 0; i < command.size(); ++i) {
-      args[i] = const_cast<char*>(command[i].c_str());
-    }
-
-    int err = execvp(command.front().c_str(), args);
+    char** argv = commands[0];
+    int err = execvp(*argv, argv);
     if (err == -1) {
       cout << "execvp() error\n";
       printErrno();
@@ -116,10 +125,28 @@ void runCommands(vector<vector<string>> commands) {
 
 int main(int argc, char* argv[]) {
   cout << "$ ";
-  string input;
-  while (getline(cin, input)) {
-    vector<vector<string> > commands = parseCommands(input);
-    runCommands(commands);
+
+  // Read a line from stdin
+  char* line = NULL;
+  size_t len = 0;
+  int read;
+  while ((read = getline(&line, &len, stdin)) != -1) {
+    line[read - 1] = '\0'; // Remove newline
+    char*** commands = parseCommands(line);
+
+    if (commands) {
+      // Execute commands
+      runCommands(commands);
+
+      // Free allocated memory for commands
+      int i = 0;
+      while (commands[i]) {
+	free(commands[i]);
+	i++;
+      }
+      free(commands);
+    }
     cout << "$ ";
   }
+  free(line);
 }
