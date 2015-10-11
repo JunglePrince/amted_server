@@ -1,9 +1,11 @@
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <iostream>
-#include <list>
 #include <string>
 #include <utility>
-
-#include <sys/wait.h>
+#include <vector>
 
 using namespace std;
 
@@ -38,11 +40,13 @@ using namespace std;
 //   return 0;
 // }
 
+
+
 /**
- * Splits input into a list of tokens on the supplied separator.
+ * Splits input into a vector of tokens on the supplied separator.
  */
-list<string> tokenize(string input, string separator) {
-  list<string> tokens;
+vector<string> tokenize(string input, string separator) {
+  vector<string> tokens;
   int prev = 0;
   int next = 0;
   while (prev != string::npos) {
@@ -57,47 +61,59 @@ list<string> tokenize(string input, string separator) {
 }
 
 /**
- * Takes a line of shell input and splits it into a list of commands.
+ * Takes a line of shell input and splits it into a vector of vectors containing
+ * the command and the command line arguments.
  */
-list<pair<string, list<string> > > parseCommands(string input) {
-  list<string> commands = tokenize(input, "|");
-  list<pair<string, list<string> > > output;
-  list<string>::iterator it;
-  for (it = commands.begin(); it != commands.end(); it++) {
+vector<vector<string> > parseCommands(string input) {
+  vector<string> rawCommands = tokenize(input, "|");
+  vector<vector<string> > output;
+  vector<string>::iterator it;
+  for (it = rawCommands.begin(); it != rawCommands.end(); it++) {
     // Tokenize the command and arguments
-    string commandAndArgs = *it;
-    list<string> args = tokenize(commandAndArgs, " ");
+    string rawCommand = *it;
+    vector<string> command = tokenize(rawCommand, " ");
     // If there is no command, abort
-    if (commandAndArgs.empty()) {
+    if (command.empty()) {
       continue;
     }
-    // Remove the command from the arglist
-    string command = args.front();
-    args.pop_front();
-    output.push_back(make_pair(command, args));
+    output.push_back(command);
   }
   return output;
 }
 
+void runCommands(vector<vector<string>> commands) {
+  pid_t pid = fork();
+  if (pid == 0) {
+    // Child process
+    vector<string> command = commands.front();
+    // Convert arguments into C string array
+    char* const args[commands.size()]();
+    int i;
+    for (i = 0; i < command.size(); ++i) {
+      args[i] = command[i].c_str();
+    }
+
+    int err = execvp(command.front().c_str(), args);
+    if (err == -1) {
+      cout << "execvp() error\n";
+    }
+  } else {
+    // Parent process
+    pid_t finished;
+    int err = wait(&finished);
+    if (err == -1) {
+      cout << "wait() error\n";
+      return;
+    }
+  }
+}
+
 int main(int argc, char* argv[]) {
   cout << "$ ";
-
   string input;
   while (getline(cin, input)) {
-    list<pair<string, list<string> > > commands = parseCommands(input);
-    list<pair<string, list<string> > >::iterator it;
-    for (it = commands.begin(); it != commands.end(); it++) {
-      string command = it->first;
-      list<string> args = it->second;
-
-      cout << "Command: " << command << "\n";
-      cout << "Arguments: ";
-      list<string>::iterator argit;
-      for (argit = args.begin(); argit != args.end(); argit++) {
-        cout << *argit << " ";
-      }
-      cout << "\n";
-    }
+    vector<vector<string> > commands = parseCommands(input);
+    runCommands(commands);
     cout << "$ ";
   }
 }
