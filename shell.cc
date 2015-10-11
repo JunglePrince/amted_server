@@ -59,9 +59,9 @@ list<string> tokenize(string input, string separator) {
 /**
  * Takes a line of shell input and splits it into a list of commands.
  */
-list<string> parseCommands(string input) {
+list<pair<string, list<string> > > parseCommands(string input) {
   list<string> commands = tokenize(input, "|");
-  list<string> output;
+  list<pair<string, list<string> > > output;
   list<string>::iterator it;
   for (it = commands.begin(); it != commands.end(); it++) {
     // Tokenize the command and arguments
@@ -74,7 +74,7 @@ list<string> parseCommands(string input) {
     // Remove the command from the arglist
     string command = args.front();
     args.pop_front();
-    output.push_back(command);
+    output.push_back(make_pair(command, args));
   }
   return output;
 }
@@ -84,10 +84,19 @@ int main(int argc, char* argv[]) {
 
   string input;
   while (getline(cin, input)) {
-    list<string> commands = parseCommands(input);
-    list<string>::iterator it;
+    list<pair<string, list<string> > > commands = parseCommands(input);
+    list<pair<string, list<string> > >::iterator it;
     for (it = commands.begin(); it != commands.end(); it++) {
-      cout << "Command: " << *it << "\n";
+      string command = it->first;
+      list<string> args = it->second;
+
+      cout << "Command: " << command << "\n";
+      cout << "Arguments: ";
+      list<string>::iterator argit;
+      for (argit = args.begin(); argit != args.end(); argit++) {
+        cout << *argit << " ";
+      }
+      cout << "\n";
     }
     cout << "$ ";
   }
