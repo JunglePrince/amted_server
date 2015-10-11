@@ -2,6 +2,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cstring>
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -40,14 +42,16 @@ using namespace std;
 //   return 0;
 // }
 
-
+void printErrno() {
+  cout << strerror(errno) << "\n";
+}
 
 /**
  * Splits input into a vector of tokens on the supplied separator.
  */
 vector<string> tokenize(string input, string separator) {
   vector<string> tokens;
-  int prev = 0;
+  size_t prev = 0;
   int next = 0;
   while (prev != string::npos) {
     int position = input.find(separator, next);
@@ -87,15 +91,16 @@ void runCommands(vector<vector<string>> commands) {
     // Child process
     vector<string> command = commands.front();
     // Convert arguments into C string array
-    char* const args[commands.size()]();
-    int i;
+    char* args[commands.size()];
+    size_t i;
     for (i = 0; i < command.size(); ++i) {
-      args[i] = command[i].c_str();
+      args[i] = const_cast<char*>(command[i].c_str());
     }
 
     int err = execvp(command.front().c_str(), args);
     if (err == -1) {
       cout << "execvp() error\n";
+      printErrno();
     }
   } else {
     // Parent process
@@ -103,6 +108,7 @@ void runCommands(vector<vector<string>> commands) {
     int err = wait(&finished);
     if (err == -1) {
       cout << "wait() error\n";
+      printErrno();
       return;
     }
   }
