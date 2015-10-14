@@ -17,15 +17,18 @@ void printErrno() {
  */
 char** tokenize(char* input, const char* delimiter) {
   size_t argmax = 64;
+  // Create an array to store tokens
   char** tokens = (char**) calloc(argmax + 1, sizeof(char*));
   if (tokens == NULL) {
     return NULL;
   }
+  // Iterate through strtok until the end, or argmax tokens created
   char* token = strtok(input, delimiter);
   size_t i = 0;
   while (token != NULL) {
     if (strlen(token) == 0)
       continue;
+    // Add the strtok token to the array we allocated
     tokens[i] = token;
     i++;
     token = strtok(NULL, delimiter);
@@ -40,6 +43,7 @@ char** tokenize(char* input, const char* delimiter) {
  * the commands and their command line arguments.
  */
 char*** parseCommands(char* input, int* len) {
+  // Split the input by pipes
   char** rawCommands = tokenize(input, "|");
   if (rawCommands == NULL)
     return NULL;
@@ -53,9 +57,11 @@ char*** parseCommands(char* input, int* len) {
     return NULL;
   }
 
+  // Allocate an array to hold the tokens of each command and their args
   char*** commands = (char***) calloc(count, sizeof(char**));
   int i = 0;
   while (rawCommands[i] != NULL) {
+    // Get the entire command and args, and split them by spaces
     char* command = rawCommands[i];
     char** commandArgs = tokenize(command, " ");
 
@@ -64,10 +70,12 @@ char*** parseCommands(char* input, int* len) {
     if (commandArgs[0] == NULL)
       continue;
 
+    // Add to the newly allocated array
     commands[i] = commandArgs;
     i++;
   }
 
+  // Free the memory used allocated for the untokenized commands + args
   free(rawCommands);
   *len = count;
   return commands;
