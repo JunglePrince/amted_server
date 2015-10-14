@@ -1,6 +1,7 @@
 #include <cstring>
 #include <iostream>
 #include <thread>
+#include <unordered_set>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -12,9 +13,17 @@
 
 #define NUM_THREADS 16
 #define MAX_PATH 512
+#define MAX_FILE_SIZE 2097152
+
 using namespace std;
 
 bool exit_requested = false;
+
+struct ioResult {
+  int socket;
+  char* buffer;
+  ssize_t size;
+};
 
 void print_usage() {
   cout << endl << "Must provide an IP address and port to listen on:" << endl;
@@ -78,9 +87,8 @@ int create_socket(char* ip, char* port) {
           exit(1);
       }
 
-
     // cleanup the unsuccessful socket
-    close (serverSocket);
+    close(serverSocket);
   }
 
   if (serverInfo == NULL) {
@@ -123,34 +131,165 @@ void write_response(int sock) {
   close(sock);
 }
 
+void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
+
+  cout << "performing disk io for client socket: " << clientSocket << endl;
+
+  FILE* fp;
+  size_t fileSize;
+  char* fileBuffer;
+  size_t bytesRead;
+
+  fp = fopen(fileName, "rb");
+  if (fp == NULL) {
+    cout << "Failure opening requested file: " << fileName << endl;
+    free(fileName);
+    // TODO cleanup
+    return;
+  }
+
+  cout << "file is open" << endl;
+
+  free(fileName);
+
+  // find the file size
+  fseek(fp, 0, SEEK_END);
+  fileSize = ftell(fp);
+  rewind(fp);
+
+  cout << "got file size: " << fileSize << endl;
+
+  fileBuffer = (char*) malloc(sizeof(char) * fileSize);
+  if (fileBuffer == NULL){
+    cout << "Failure allocating fileBuffer for requested file: " << fileName << endl;
+    // TODO cleanup
+    fclose(fp);
+    free(fileBuffer);
+    return;
+  }
+
+  // copy the file into the buffer:
+  bytesRead = fread(fileBuffer, 1, fileSize, fp);
+  if (bytesRead != fileSize) {
+    cout << "Failure reading requested file: " << fileName << endl;
+    // TODO cleanup
+    fclose(fp);
+    free(fileName);
+    free(fileBuffer);
+    return;
+  }
+
+  fclose(fp);
+
+  // write socket and buffer ptr to the pipe to signal completion
+  // size_t bufSize = sizeof(int) + sizeof(void*);
+  // doneBuffer = (char*) malloc(bufSize);
+  // long long int addr = (long long int) doneBuffer;
+
+  // memcpy(doneBuffer, (void*) &clientSocket, sizeof(int));
+  // memcpy(doneBuffer + sizeof(int), (void*) &addr, sizeof(void*));
+  // printf("ACTUAL client socket: %d actual pointer: %p", clientSocket, doneBuffer);
+  // write(diskIoPipe, doneBuffer, sizeof(doneBuffer));
+
+  ioResult* result = (ioResult*) malloc(sizeof(ioResult));
+  result->socket = clientSocket;
+  result->buffer = fileBuffer;
+  result->size = fileSize;
+
+  write(diskIoPipe, result, sizeof(ioResult));
+
+  free(result);
+  close(diskIoPipe);
+  //write_response(diskIoPipe);
+
+  // TODO temporary
+  //
+  //write_response(clientSocket);
+
+}
+
 void read_request(int sock, int epoll) {
-  char readbuf[MAX_PATH];
-  ssize_t status = read(sock, readbuf, MAX_PATH);
-  if (status == 0) {
+  cout << "reading from client socket: " << sock << endl;
+  char* readbuf = (char*) malloc(MAX_PATH);
+  ssize_t bytesRead = read(sock, readbuf, MAX_PATH);
+  if (bytesRead == 0) {
       // other side closed the connection, nothing to read
+      cout << "nothing read from socket" << endl;
       close(sock);
       return;
     }
-    if ( res == -1 ) {
+    if (bytesRead == -1) {
       // TODO
       cout << "read failure" << endl;
       exit(1);
     }
-    // Log the data we just read and then send it back to the other side.
-    readbuf[res-1] = '\0';
-    cout << readbuf << endl;
-    // write(sock, readbuf, strlen(readbuf));
+
+    readbuf[bytesRead-1] = '\0';
 
     // take no more requests from this client
     struct epoll_event event; // can be null in newer kernel versions
     int status = epoll_ctl(epoll, EPOLL_CTL_DEL, sock, &event);
-    if (status !=0){}
-  // }
+    if (status != 0) {
+      // TODO
+      cout << "error removing socket from event queue" << endl;
+    }
 
-    write_response(sock);
+    // create a pipe to communicate with the other thread
+    int diskIoPipes[2];
+    status = pipe(diskIoPipes);
+    if (false) {
+      //TODO
+    }
+
+    // add this side of the pipe to the event queue
+    event.data.fd = diskIoPipes[0];
+    event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
+    status = epoll_ctl(epoll, EPOLL_CTL_ADD, diskIoPipes[0], &event);
+    if (status !=0) {
+    // TODO
+    }
+
+    printf("FILENAME: %s\n", readbuf);
+
+    cout << "added pipe to event queue: " << diskIoPipes[0] << endl;
+    // create a thread to handle the read request
+    thread diskIoThread(performDiskIo, sock, readbuf, diskIoPipes[1]);
+    diskIoThread.detach();
+
+    // write_response(sock);
 
   // close(sock);
 }
+
+void write_response(int diskIoPipe, int epoll) {
+  ioResult result;
+  ssize_t bytesWritten;
+  ssize_t bytesRead = read(diskIoPipe, &result, sizeof(ioResult));
+  if (bytesRead != sizeof(ioResult)) {
+    cout << "Failure reading file from pipe." << endl;
+  }
+
+  cout << "writing response for client socket: " << result.socket << endl;
+  cout << "from the pipe: " << diskIoPipe << endl;
+
+  // remove the pipe from the epoll
+  struct epoll_event event; // can be null in newer kernel versions
+  int status = epoll_ctl(epoll, EPOLL_CTL_DEL, diskIoPipe, &event);
+  if (status == -1) {
+    cout << "Failure removing pipes from the event queue: " << errno << endl;
+  }
+
+  // close the pipe
+  close(diskIoPipe);
+
+  // write to the client socket and close it
+  bytesWritten = write(result.socket, result.buffer, result.size);
+  if (bytesWritten != result.size) {
+    cout << "Failure writing to client socket." << endl;
+  }
+  close(result.socket);
+}
+
 
 int main(int argc, char* argv[]) {
 
@@ -196,6 +335,9 @@ int main(int argc, char* argv[]) {
     cleanup_and_exit();
   }
 
+  // set to track the client sockets
+  unordered_set<int> clients = {};
+
   // add the listening socket to the event queue
   event.data.fd = serverSocket;
   event.events = EPOLLIN;
@@ -207,13 +349,15 @@ int main(int argc, char* argv[]) {
 
   while (!exit_requested) {
     // get each event one at a time
+    // TODO do we need to alloc here?
     struct epoll_event* events = (epoll_event*) calloc(1, sizeof(epoll_event));
+
     int n = epoll_wait(epoll, events, 1, -1);
     if (n == 0) {
       // nothing returned from poll for some reason
       continue;
     } else if (n == -1) {
-      cout << "Failure polling event queue: " << errno << endl;
+      cout << "Failure polling event queue: " << strerror(errno) << endl;
       cleanup_and_exit();
     }
 
@@ -221,6 +365,8 @@ int main(int argc, char* argv[]) {
       // notification on the server socket for an incoming connection
       struct sockaddr* clientAddr = new struct sockaddr;
       socklen_t clientAddrLen = sizeof(struct sockaddr);
+
+      // accept new client connection
       int clientSocket = accept(serverSocket, clientAddr, &clientAddrLen);
       if (clientSocket == -1) {
         cout << "Failure accepting new connection: " << errno << endl;
@@ -236,18 +382,26 @@ int main(int argc, char* argv[]) {
 
       // add the client socket to the event queue
       event.data.fd = clientSocket;
-      event.events = EPOLLIN;
+      event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
       status = epoll_ctl(epoll, EPOLL_CTL_ADD, clientSocket, &event);
       if (status == -1) {
         cout << "Failure queuing the client socket: " << errno << endl;
         cleanup_and_exit();
       }
-    } else if (false){
-      // notification on a pipe - means a disk I/O has completed
-      // TODO
-    } else {
-      // notification on a client socket
+
+      // save this active client socket
+      clients.insert(clientSocket);
+
+      cout << "accepted connction on client socket: " << clientSocket << endl;
+
+    } else if (clients.count(events[0].data.fd) > 0) {
+      // notification on a client socket, ready to read request
       read_request(events[0].data.fd, epoll);
+      clients.erase(events[0].data.fd);
+
+    } else {
+      // notification on a pipe, means a disk I/O has completed
+      write_response(events[0].data.fd, epoll);
     }
   }
 
