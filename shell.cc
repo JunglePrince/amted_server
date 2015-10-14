@@ -8,37 +8,6 @@
 
 using namespace std;
 
-// int exec_pipes(char* argvv[][512], int pds[][2], int index, int size) {
-//   if (index == size - 1) {
-//     close(pds[index-1][0]);
-//     dup2(pds[index-1][1], 1);
-//     execvp(argvv[size-index-1][0], argvv[size-index-1]);
-//     return 0;
-//   }
-//   if (pipe(pds[index]) == -1) {
-//     cerr << "pipe err" << endl;
-//     exit(EXIT_FAILURE);
-//   }
-//   pid_t pID;
-//   if ((pID = fork()) == -1) {
-//     cerr << "fork err" << endl;
-//     exit(EXIT_FAILURE);
-//   }
-//   if (pID == 0) {
-//     exec_pipes(argvv, pds, index+1, size);
-//   } else {
-//     wait(&pID);
-//     close(pds[index][1]);
-//     dup2(pds[index][0],0);
-//     if (index > 0) {
-//       close(pds[index-1][0]);
-//       dup2(pds[index-1][1],1);
-//     }
-//     execvp(argvv[size - index - 1][0], argvv[size - index - 1]);
-//   }
-//   return 0;
-// }
-
 void printErrno() {
   cout << strerror(errno) << "\n";
 }
@@ -79,8 +48,10 @@ char*** parseCommands(char* input, int* len) {
   while (rawCommands[count] != NULL)
     count++;
 
-  if (count == 0)
+  if (count == 0) {
+    free(rawCommands);
     return NULL;
+  }
 
   char*** commands = (char***) calloc(count, sizeof(char**));
   int i = 0;
@@ -112,16 +83,14 @@ int runCommands(char*** commands, int index) {
   if (index == 0) {
     char** argv = commands[index];
     if (execvp(*argv, argv) == -1) {
-      cout << "execvp() error:\n";
       printErrno();
-      return -1;
+      return 0;
     }
   }
 
   // Create pipes to receive data from the preceding command
   int pipes[2];  // 0 is read, 1 is write
   if (pipe(pipes) == -1) {
-    cout << "pipe() error:\n";
     printErrno();
     return -1;
   };
@@ -145,9 +114,8 @@ int runCommands(char*** commands, int index) {
     close(pipes[1]);
     char** argv = commands[index];
     if (execvp(*argv, argv) == -1) {
-      cout << "execvp() error:\n";
       printErrno();
-      return -1;
+      return 0;
     }
   }
   return 0;
@@ -167,9 +135,11 @@ int main(int argc, char* argv[]) {
       pid_t pid = fork();
       if (pid == 0) {
         // Child process runs the commands
-        if (runCommands(commands, len - 1) == -1) {
+        if (runCommands(commands, len - 1) == -1)
           return 1;
-        }
+	else
+	  return 0;
+   
       } else {
         // Parent process waits for all commands to return
         pid_t finished;
@@ -184,7 +154,6 @@ int main(int argc, char* argv[]) {
 
         // Exit on error
         if (err == -1) {
-          cout << "wait() error\n";
           printErrno();
           break;
         }
