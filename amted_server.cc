@@ -180,31 +180,24 @@ void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
 void read_request(int sock, int epoll) {
   char* fileName = (char*) malloc(MAX_PATH);
   ssize_t bytesRead = read(sock, fileName, MAX_PATH);
+  int status;
+  struct epoll_event event;
   if (bytesRead == 0) {
       // other side closed the connection, nothing to read
       cout << "Failure nothing read from client socket" << endl;
       free(fileName);
       close(sock);
-      // TODO remove socket form epoll
       return;
     }
     if (bytesRead == -1) {
       cout << "Failure reading from client socket: " << strerror(errno) << endl;
       free(fileName);
       close(sock);
-      // TODO remove socket form epoll
       return;
     }
 
     // ensure the file is null terminated
     fileName[bytesRead-1] = '\0';
-
-    // take no more requests from this client
-    struct epoll_event event; // can be null in newer kernel versions
-    int status = epoll_ctl(epoll, EPOLL_CTL_DEL, sock, &event);
-    if (status == -1) {
-      cout << "Failure removing client socket from event queue: " << strerror(errno) << endl;
-    }
 
     // create a pipe to communicate with the other thread
     int diskIoPipes[2];
@@ -213,7 +206,6 @@ void read_request(int sock, int epoll) {
       cout << "Failure creating pipes: " << strerror(errno) << endl;
       free(fileName);
       close(sock);
-      // TODO remove socket form epoll
       return;
     }
 
@@ -225,7 +217,6 @@ void read_request(int sock, int epoll) {
       cout << "Failure adding pipe to event queue: " << strerror(errno) << endl;
       free(fileName);
       close(sock);
-      // TODO remove socket form epoll
       return;
     }
 
@@ -259,6 +250,8 @@ void write_response(int diskIoPipe, int epoll) {
   if (bytesWritten != result.size) {
     cout << "Failure writing to client socket." << endl;
   }
+
+  free(result.buffer);
   close(result.socket);
 }
 
@@ -272,6 +265,7 @@ int main(int argc, char* argv[]) {
 
   char* ip = argv[1];
   char* port = argv[2];
+  struct epoll_event* events;
 
   // catch signal to exit
   signal(SIGINT, sighandler);
@@ -329,7 +323,7 @@ int main(int argc, char* argv[]) {
   while (!exit_requested) {
     // get each event one at a time
     // TODO do we need to alloc here?
-    struct epoll_event* events = (epoll_event*) calloc(1, sizeof(epoll_event));
+    events = (epoll_event*) calloc(1, sizeof(epoll_event));
 
     int n = epoll_wait(epoll, events, 1, -1);
     if (n == 0) {
@@ -338,6 +332,7 @@ int main(int argc, char* argv[]) {
     } else if (n == -1) {
       cout << "Failure polling event queue: " << strerror(errno) << endl;
       close(serverSocket);
+      free(events);
       exit(EXIT_FAILURE);
     }
 
@@ -369,23 +364,34 @@ int main(int argc, char* argv[]) {
         close(serverSocket);
         close(clientSocket);
         close(epoll);
+        free(events);
         exit(EXIT_FAILURE);
       }
 
       // save this active client socket
       clients.insert(clientSocket);
 
-      cout << "accepted connction on client socket: " << clientSocket << endl;
-
     } else if (clients.count(events[0].data.fd) > 0) {
       // notification on a client socket, ready to read request
       read_request(events[0].data.fd, epoll);
       clients.erase(events[0].data.fd);
 
+      // take no more requests from this client
+      int status = epoll_ctl(epoll, EPOLL_CTL_DEL, events[0].data.fd, &event);
+      if (status == -1) {
+        cout << "Failure removing client socket from event queue: " << strerror(errno) << endl;
+      }
+
     } else {
       // notification on a pipe, means a disk I/O has completed
       write_response(events[0].data.fd, epoll);
     }
+
+    free(events);
+  }
+
+  if (events != NULL) {
+    free(events);
   }
 
   close(serverSocket);
