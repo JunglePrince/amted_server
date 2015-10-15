@@ -11,7 +11,6 @@
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 
-#define NUM_THREADS 16
 #define MAX_PATH 512
 #define MAX_FILE_SIZE 2097152
 
@@ -42,8 +41,12 @@ void exit_with_error(const char* errorMsg) {
   exit(EXIT_FAILURE);
 }
 
+// Creates and binds a server socket given the ip address and port.
+// Returns the socket descriptor as an int or -1 in the event of a failure.
 int create_socket(char* ip, char* port) {
+  int optval;
   int status;
+  int serverSocket;
   struct addrinfo hints;
   struct addrinfo *results;
   struct addrinfo *serverInfo;
@@ -54,56 +57,54 @@ int create_socket(char* ip, char* port) {
 
   status = getaddrinfo(ip, port, &hints, &results);
   if (status != 0) {
-    // TODO cleanup this error handling
-    fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
-    exit(1);
+    cout << "Failure getting ip and port info: " << gai_strerror(status) << endl;
+    return -1;
   }
 
   // results now points to a linked list of 1 or more struct addrinfos.
-  int serverSocket;
   for (serverInfo = results; serverInfo != NULL; serverInfo = serverInfo->ai_next) {
     serverSocket = socket(serverInfo->ai_family, serverInfo->ai_socktype, serverInfo->ai_protocol);
     if (serverSocket == -1) {
-      cout << "socket failure: " << errno;
+      cout << "Failure creating server socket: " << strerror(errno) << endl;
       continue;
     }
 
     status = bind(serverSocket, serverInfo->ai_addr, serverInfo->ai_addrlen);
-      if (status == 0) {
-        // successful bind
+    if (status == -1) {
+      // cleanup the unsuccessful socket
+      close(serverSocket);
+      freeaddrinfo(results);
+      cout << "Failure binding server socket: " << strerror(errno) << endl;
+      return -1;
+    }
 
-        // Set option to reuse the socket immediately
-        int optval = 1;
-        status = setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-        if (status != 0) {
+    // Set option to reuse the socket immediately
+    optval = 1;
+    status = setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+    if (status == -1) {
+      // cleanup the unsuccessful socket
+      close(serverSocket);
+      freeaddrinfo(results);
+      cout << "Failure setting server socket reuse options: " << strerror(errno) << endl;
+      return -1;
+    }
 
-          // TODO error handling
-          cout << "socket reuse options failed" << endl;
-          exit(1);
-        }
-        break;
-      } else {
-        cout << "whats going on?? " << status << " " << errno << endl;
-          exit(1);
-      }
-
-    // cleanup the unsuccessful socket
-    close(serverSocket);
+    // the socket was successfully setup
+    break;
   }
 
   if (serverInfo == NULL) {
-    // TODO
-    // fprintf (stderr, "Could not bind\n");
-    // return -1;
-    cout << "server socket failure" << endl;
-    exit(1);
+    // sanity check
+    cout << "Failure binding server socket: " << strerror(errno) << endl;;
+    return -1;
   }
 
-  // freeaddrinfo(result);
-
+  freeaddrinfo(results);
   return serverSocket;
 }
 
+// Sets the mode for the provided socket to be non-blocking.
+// Returns: 0 on success, or -1 in the event of a failure.
 static int make_socket_non_blocking(int socket) {
   int flags;
   int status;
@@ -121,91 +122,61 @@ static int make_socket_non_blocking(int socket) {
     return -1;
   }
 
+  // success
   return 0;
 }
 
-void write_response(int sock) {
-  char writeBuf[1024];
-  memset(&writeBuf, 'X', 1024);
-  write(sock, writeBuf, 1024);
-  close(sock);
-}
-
 void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
-
-  cout << "performing disk io for client socket: " << clientSocket << endl;
-
   FILE* fp;
-  size_t fileSize;
-  char* fileBuffer;
+  size_t fileSize = 0;
   size_t bytesRead;
+  char* fileBuffer;
+  ioResult* result;
 
   fp = fopen(fileName, "rb");
   if (fp == NULL) {
-    cout << "Failure opening requested file: " << fileName << endl;
-    free(fileName);
-    // TODO cleanup
-    return;
-  }
+    // error opening file, need to signal error to close the client socket.
+    cout << "Failure opening requested file: " << fileName << strerror(errno) << endl;
+    // null buffer pointer represents an error reading the file.
+    fileBuffer = NULL;
+  } else {
+    // find the file size
+    fseek(fp, 0, SEEK_END);
+    fileSize = ftell(fp);
+    rewind(fp);
 
-  cout << "file is open" << endl;
+    fileBuffer = (char*) malloc(sizeof(char) * fileSize);
+    if (fileBuffer == NULL) {
+      cout << "Failure allocating fileBuffer for requested file: " << fileName << strerror(errno) << endl;
+    } else {
+      // copy the file into the buffer:
+      bytesRead = fread(fileBuffer, 1, fileSize, fp);
+      if (bytesRead != fileSize) {
+        free(fileBuffer);
+        cout << "Failure reading requested file: " << fileName << endl;
+        // null buffer pointer represents an error reading the file.
+        fileBuffer == NULL;
+      }
+    }
 
-  free(fileName);
-
-  // find the file size
-  fseek(fp, 0, SEEK_END);
-  fileSize = ftell(fp);
-  rewind(fp);
-
-  cout << "got file size: " << fileSize << endl;
-
-  fileBuffer = (char*) malloc(sizeof(char) * fileSize);
-  if (fileBuffer == NULL){
-    cout << "Failure allocating fileBuffer for requested file: " << fileName << endl;
-    // TODO cleanup
+    // done with file
     fclose(fp);
-    free(fileBuffer);
-    return;
   }
 
-  // copy the file into the buffer:
-  bytesRead = fread(fileBuffer, 1, fileSize, fp);
-  if (bytesRead != fileSize) {
-    cout << "Failure reading requested file: " << fileName << endl;
-    // TODO cleanup
-    fclose(fp);
-    free(fileName);
-    free(fileBuffer);
-    return;
-  }
-
-  fclose(fp);
-
-  // write socket and buffer ptr to the pipe to signal completion
-  // size_t bufSize = sizeof(int) + sizeof(void*);
-  // doneBuffer = (char*) malloc(bufSize);
-  // long long int addr = (long long int) doneBuffer;
-
-  // memcpy(doneBuffer, (void*) &clientSocket, sizeof(int));
-  // memcpy(doneBuffer + sizeof(int), (void*) &addr, sizeof(void*));
-  // printf("ACTUAL client socket: %d actual pointer: %p", clientSocket, doneBuffer);
-  // write(diskIoPipe, doneBuffer, sizeof(doneBuffer));
-
-  ioResult* result = (ioResult*) malloc(sizeof(ioResult));
+  // write socket, buffer pointer, and buffer size to the pipe to signal completion
+  // A null buffer implies a failure reading the file.
+  result = (ioResult*) malloc(sizeof(ioResult));
   result->socket = clientSocket;
   result->buffer = fileBuffer;
   result->size = fileSize;
 
   write(diskIoPipe, result, sizeof(ioResult));
 
+  free(fileName);
   free(result);
+
+  // close the write end of the pipe
   close(diskIoPipe);
-  //write_response(diskIoPipe);
-
-  // TODO temporary
-  //
-  //write_response(clientSocket);
-
 }
 
 void read_request(int sock, int epoll) {
