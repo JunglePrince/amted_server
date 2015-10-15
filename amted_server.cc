@@ -26,7 +26,7 @@ struct ioResult {
 };
 
 void sighandler(int param) {
-  cout << "Caught signal: " << param << ".  Requesting termination." << endl;
+  cout << endl << "Caught signal: " << param << ".  Requesting termination." << endl;
   exit_requested = true;
 }
 
@@ -129,12 +129,12 @@ void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
   size_t fileSize = 0;
   size_t bytesRead;
   char* fileBuffer;
-  ioResult* result;
+  ioResult result;
 
   fp = fopen(fileName, "rb");
   if (fp == NULL) {
     // error opening file, need to signal error to close the client socket.
-    cout << "Failure opening requested file: " << fileName << strerror(errno) << endl;
+    cout << "Failure opening requested file: " << fileName << ". "<< strerror(errno) << endl;
     // null buffer pointer represents an error reading the file.
     fileBuffer = NULL;
   } else {
@@ -163,15 +163,13 @@ void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
 
   // write socket, buffer pointer, and buffer size to the pipe to signal completion
   // A null buffer implies a failure reading the file.
-  result = (ioResult*) malloc(sizeof(ioResult));
-  result->socket = clientSocket;
-  result->buffer = fileBuffer;
-  result->size = fileSize;
+  result.socket = clientSocket;
+  result.buffer = fileBuffer;
+  result.size = fileSize;
 
-  write(diskIoPipe, result, sizeof(ioResult));
+  write(diskIoPipe, &result, sizeof(ioResult));
 
   free(fileName);
-  free(result);
 
   // close the write end of the pipe
   close(diskIoPipe);
@@ -265,15 +263,13 @@ int main(int argc, char* argv[]) {
 
   char* ip = argv[1];
   char* port = argv[2];
-  struct epoll_event* events;
+  struct epoll_event events[1];
 
   // catch signal to exit
   signal(SIGINT, sighandler);
 
   cout << "Starting AMTED server..." << endl;
   cout << "Server pid = " << getpid() << endl;
-
-  // TODO port between 1024 and 65535
 
   int serverSocket = create_socket(ip, port);
   if (serverSocket == -1) {
@@ -322,9 +318,6 @@ int main(int argc, char* argv[]) {
 
   while (!exit_requested) {
     // get each event one at a time
-    // TODO do we need to alloc here?
-    events = (epoll_event*) calloc(1, sizeof(epoll_event));
-
     int n = epoll_wait(epoll, events, 1, -1);
     if (n == 0) {
       // nothing returned from poll for some reason
@@ -332,7 +325,6 @@ int main(int argc, char* argv[]) {
     } else if (n == -1) {
       cout << "Failure polling event queue: " << strerror(errno) << endl;
       close(serverSocket);
-      free(events);
       exit(EXIT_FAILURE);
     }
 
@@ -347,6 +339,8 @@ int main(int argc, char* argv[]) {
         cout << "Failure accepting new connection: " << errno << endl;
         continue;
       }
+
+      delete clientAddr;
 
       status = make_socket_non_blocking(clientSocket);
       if (status == -1) {
@@ -364,7 +358,6 @@ int main(int argc, char* argv[]) {
         close(serverSocket);
         close(clientSocket);
         close(epoll);
-        free(events);
         exit(EXIT_FAILURE);
       }
 
@@ -386,12 +379,6 @@ int main(int argc, char* argv[]) {
       // notification on a pipe, means a disk I/O has completed
       write_response(events[0].data.fd, epoll);
     }
-
-    free(events);
-  }
-
-  if (events != NULL) {
-    free(events);
   }
 
   close(serverSocket);
