@@ -1,7 +1,14 @@
-Eric Zeng
-Nicholas Shahan 1266066 nshahan@uw.washington.edu
+Eric Zeng 0450860 ericzeng@cs.washington.edu
+Nicholas Shahan 1266066 nshahan@cs.washington.edu
 
 Part A
+
+Concurrency architecture inspired by:
+http://web.cse.ohio-state.edu/~mamrak/CIS762/pipes_lab_notes.html
+
+Valgrind reports a memory leak on termination, and the stack trace
+attributes it to the valgrind malloc implementation or the ld shared
+library. We don't think that it originated from our code.
 
 
 Part B
