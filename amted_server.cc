@@ -10,6 +10,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
+#include <signal.h>
 
 #define MAX_PATH 512
 #define MAX_FILE_SIZE 2097152
@@ -24,21 +25,14 @@ struct ioResult {
   ssize_t size;
 };
 
+void sighandler(int param) {
+  cout << "Caught signal: " << param << ".  Requesting termination." << endl;
+  exit_requested = true;
+}
+
 void print_usage() {
   cout << endl << "Must provide an IP address and port to listen on:" << endl;
   cout << "\t550server <IP Address> <Port>" << endl << endl;
-}
-
-void cleanup_and_exit() {
-  exit_requested = true;
-  // TODO join threads and free memory
-  exit(EXIT_FAILURE);
-}
-
-void exit_with_error(const char* errorMsg) {
-  cerr << endl << errorMsg << endl;
-  cleanup_and_exit();
-  exit(EXIT_FAILURE);
 }
 
 // Creates and binds a server socket given the ip address and port.
@@ -126,6 +120,10 @@ static int make_socket_non_blocking(int socket) {
   return 0;
 }
 
+// Reads the named file from disk into a buffer. Writes the client socket,
+// buffer pointer, and file size to the provided pipe.
+// In the event of an error reading the file the pointer written to the buffer
+// will be null.
 void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
   FILE* fp;
   size_t fileSize = 0;
@@ -180,58 +178,64 @@ void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
 }
 
 void read_request(int sock, int epoll) {
-  cout << "reading from client socket: " << sock << endl;
-  char* readbuf = (char*) malloc(MAX_PATH);
-  ssize_t bytesRead = read(sock, readbuf, MAX_PATH);
+  char* fileName = (char*) malloc(MAX_PATH);
+  ssize_t bytesRead = read(sock, fileName, MAX_PATH);
   if (bytesRead == 0) {
       // other side closed the connection, nothing to read
-      cout << "nothing read from socket" << endl;
+      cout << "Failure nothing read from client socket" << endl;
+      free(fileName);
       close(sock);
+      // TODO remove socket form epoll
       return;
     }
     if (bytesRead == -1) {
-      // TODO
-      cout << "read failure" << endl;
-      exit(1);
+      cout << "Failure reading from client socket: " << strerror(errno) << endl;
+      free(fileName);
+      close(sock);
+      // TODO remove socket form epoll
+      return;
     }
 
-    readbuf[bytesRead-1] = '\0';
+    // ensure the file is null terminated
+    fileName[bytesRead-1] = '\0';
 
     // take no more requests from this client
     struct epoll_event event; // can be null in newer kernel versions
     int status = epoll_ctl(epoll, EPOLL_CTL_DEL, sock, &event);
-    if (status != 0) {
-      // TODO
-      cout << "error removing socket from event queue" << endl;
+    if (status == -1) {
+      cout << "Failure removing client socket from event queue: " << strerror(errno) << endl;
     }
 
     // create a pipe to communicate with the other thread
     int diskIoPipes[2];
     status = pipe(diskIoPipes);
-    if (false) {
-      //TODO
+    if (status == -1) {
+      cout << "Failure creating pipes: " << strerror(errno) << endl;
+      free(fileName);
+      close(sock);
+      // TODO remove socket form epoll
+      return;
     }
 
     // add this side of the pipe to the event queue
     event.data.fd = diskIoPipes[0];
     event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
     status = epoll_ctl(epoll, EPOLL_CTL_ADD, diskIoPipes[0], &event);
-    if (status !=0) {
-    // TODO
+    if (status == -1) {
+      cout << "Failure adding pipe to event queue: " << strerror(errno) << endl;
+      free(fileName);
+      close(sock);
+      // TODO remove socket form epoll
+      return;
     }
 
-    printf("FILENAME: %s\n", readbuf);
-
-    cout << "added pipe to event queue: " << diskIoPipes[0] << endl;
     // create a thread to handle the read request
-    thread diskIoThread(performDiskIo, sock, readbuf, diskIoPipes[1]);
+    thread diskIoThread(performDiskIo, sock, fileName, diskIoPipes[1]);
     diskIoThread.detach();
-
-    // write_response(sock);
-
-  // close(sock);
 }
 
+// Reads results form the provided pipe. Marshals the client socket, buffer
+// pointer, and file size. Copies the file to the client socket.
 void write_response(int diskIoPipe, int epoll) {
   ioResult result;
   ssize_t bytesWritten;
@@ -239,9 +243,6 @@ void write_response(int diskIoPipe, int epoll) {
   if (bytesRead != sizeof(ioResult)) {
     cout << "Failure reading file from pipe." << endl;
   }
-
-  cout << "writing response for client socket: " << result.socket << endl;
-  cout << "from the pipe: " << diskIoPipe << endl;
 
   // remove the pipe from the epoll
   struct epoll_event event; // can be null in newer kernel versions
@@ -261,7 +262,7 @@ void write_response(int diskIoPipe, int epoll) {
   close(result.socket);
 }
 
-
+// mainline program
 int main(int argc, char* argv[]) {
 
   if (argc != 3) {
@@ -272,6 +273,9 @@ int main(int argc, char* argv[]) {
   char* ip = argv[1];
   char* port = argv[2];
 
+  // catch signal to exit
+  signal(SIGINT, sighandler);
+
   cout << "Starting AMTED server..." << endl;
   cout << "Server pid = " << getpid() << endl;
 
@@ -279,20 +283,22 @@ int main(int argc, char* argv[]) {
 
   int serverSocket = create_socket(ip, port);
   if (serverSocket == -1) {
-    cout << "Failure creating a listening socket: " << errno << endl;
-    cleanup_and_exit();
+    cout << "Failure creating a listening socket: " << strerror(errno) << endl;
+    exit(EXIT_FAILURE);
   }
 
   int status = make_socket_non_blocking(serverSocket);
   if (status == -1) {
     cout << "Failure making the listening socket non-blocking." << endl;
-    cleanup_and_exit();
+    close(serverSocket);
+    exit(EXIT_FAILURE);
   }
 
   status = listen(serverSocket, SOMAXCONN);
   if (status == -1) {
     cout << "Failure listening to socket: " << errno << endl;
-    cleanup_and_exit();
+    close(serverSocket);
+    exit(EXIT_FAILURE);
   }
 
   cout << "Success." << endl << "Listening on: " << ip << ":" << port << endl;
@@ -303,7 +309,8 @@ int main(int argc, char* argv[]) {
   int epoll = epoll_create1(0);
   if (epoll == -1) {
     cout << "Failure creating event queue: " << errno << endl;
-    cleanup_and_exit();
+    close(serverSocket);
+    exit(EXIT_FAILURE);
   }
 
   // set to track the client sockets
@@ -315,7 +322,8 @@ int main(int argc, char* argv[]) {
   status = epoll_ctl(epoll, EPOLL_CTL_ADD, serverSocket, &event);
   if (status == -1) {
     cout << "Failure queuing the listening socket: " << errno << endl;
-    cleanup_and_exit();
+    close(serverSocket);
+    exit(EXIT_FAILURE);
   }
 
   while (!exit_requested) {
@@ -329,7 +337,8 @@ int main(int argc, char* argv[]) {
       continue;
     } else if (n == -1) {
       cout << "Failure polling event queue: " << strerror(errno) << endl;
-      cleanup_and_exit();
+      close(serverSocket);
+      exit(EXIT_FAILURE);
     }
 
     if (serverSocket == events[0].data.fd) {
@@ -357,7 +366,10 @@ int main(int argc, char* argv[]) {
       status = epoll_ctl(epoll, EPOLL_CTL_ADD, clientSocket, &event);
       if (status == -1) {
         cout << "Failure queuing the client socket: " << errno << endl;
-        cleanup_and_exit();
+        close(serverSocket);
+        close(clientSocket);
+        close(epoll);
+        exit(EXIT_FAILURE);
       }
 
       // save this active client socket
@@ -376,6 +388,5 @@ int main(int argc, char* argv[]) {
     }
   }
 
-
-  // freeaddrinfo(serverInfo);
+  close(serverSocket);
 }
