@@ -1,5 +1,6 @@
 #include <iostream>
 
+#include <signal.h>
 #include <string.h>
 #include <stdio.h>
 #include <sys/types.h>
@@ -129,8 +130,14 @@ int runCommands(char*** commands, int index) {
   return 0;
 }
 
+void sigintHandler(int signal) {
+  fclose(stdin);
+}
+
 int main(int argc, char* argv[]) {
   cout << "$ ";
+  // Add signal handler for terminating input loop
+  signal(SIGINT, sigintHandler);
   // Read a line from stdin
   char* line = NULL;
   size_t len = 0;
@@ -145,9 +152,9 @@ int main(int argc, char* argv[]) {
         // Child process runs the commands
         if (runCommands(commands, len - 1) == -1)
           return 1;
-	else
-	  return 0;
-   
+        else
+          return 0;
+
       } else {
         // Parent process waits for all commands to return
         pid_t finished;
@@ -170,4 +177,6 @@ int main(int argc, char* argv[]) {
     cout << "$ ";
   }
   free(line);
+  cout << "\n";
+  return 0;
 }
