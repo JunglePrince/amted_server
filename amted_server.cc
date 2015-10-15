@@ -153,7 +153,7 @@ void performDiskIo(int clientSocket, char* fileName, int diskIoPipe) {
         free(fileBuffer);
         cout << "Failure reading requested file: " << fileName << endl;
         // null buffer pointer represents an error reading the file.
-        fileBuffer == NULL;
+        fileBuffer = NULL;
       }
     }
 
