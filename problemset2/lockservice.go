@@ -3,7 +3,6 @@ package problemset2
 import "net"
 import "fmt"
 import "net/rpc"
-import "sync"
 import "os"
 import "syscall"
 import "encoding/gob"
@@ -22,10 +21,10 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 type LockService struct {
-	locks map[int]int // map lock id -> client id
-	px    *Paxos
-	max   int // The highest operation committed locally.
-	mu    sync.Mutex
+	locks    map[int]int // map lock id -> client id
+	px       *Paxos
+	max      int // The highest operation committed locally.
+	requests chan Request
 
 	l          net.Listener
 	me         int
@@ -33,6 +32,14 @@ type LockService struct {
 	unreliable bool // for testing
 }
 
+type Request struct {
+	Op       Op
+	Response chan Err
+}
+
+const Requeue = "Requeue"
+
+// Op Types
 const (
 	Lock   = "Lock"
 	Unlock = "Unlock"
@@ -49,15 +56,32 @@ type Op struct {
 const Unlocked = -1
 
 func (ls *LockService) Lock(args *LockArgs, reply *LockReply) error {
-	myOp := Op{Lock, args.Client, args.Lock}
-	err, val = ls.getAgreement(myOp)
-	reply.Err = err
+	op := Op{Lock, args.Client, args.Lock}
+	reply.Err = enqueueRequest(op)
 }
 
 func (ls *LockService) Unlock(args *UnlockArgs, reply *UnlockReply) error {
-	myOp := Op{Unlock, args.Client, args.Lock}
-	err, val = ls.getAgreement(myOp)
-	reply.Err = err
+	op := Op{Unlock, args.Client, args.Lock}
+	reply.Err = enqueueRequest(op)
+}
+
+func (ls *LockService) enqueueRequest(op Op) Err {
+	response := make(chan Err)
+	request = Request{op, response}
+	ls.requests <- request
+	return <-response
+}
+
+func (ls *LockService) dequeueRequests() {
+	for !ls.dead {
+		request := <-requests
+		err := getAgreement(request.Op)
+		if err == Requeue {
+			requests <- request
+		} else {
+			request.Response <- err
+		}
+	}
 }
 
 // Gets Paxos to agree to the given operation. If other nodes have already
@@ -67,7 +91,7 @@ func (ls *LockService) Unlock(args *UnlockArgs, reply *UnlockReply) error {
 // Returns the Err string, and the previous value if it was a Put operation
 // on a key that already existed, or the value for the key if it was a Get
 // operation.
-func (ls *LockService) getAgreement(myOp Op) (Err, string) {
+func (ls *LockService) getAgreement(myOp Op) Err {
 	// Keep trying to propose a paxos instance until it succeeds.
 	for {
 		instance := ls.max + 1
@@ -87,11 +111,11 @@ func (ls *LockService) getAgreement(myOp Op) (Err, string) {
 
 		// Operation needs to be done regardless of whether our operation was
 		// chosen.
-		err, val := ls.commitOperation(instance, op)
+		err := ls.commitOperation(instance, op)
 
 		// Finish when myOp was the one committed.
 		if op == myOp {
-			return err, val
+			return err
 		}
 	}
 	// Should never reach here
@@ -99,9 +123,6 @@ func (ls *LockService) getAgreement(myOp Op) (Err, string) {
 }
 
 func (ls *LockService) commitOperation(instance int, op Op) Err {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-
 	if instance != ls.max+1 {
 		panic(fmt.Sprintf("Committing out of order! Expected: %v, Actual: %v\n", kv.max+1, instance))
 	}
@@ -110,7 +131,7 @@ func (ls *LockService) commitOperation(instance int, op Op) Err {
 
 	if op.OpType == Lock {
 		if ls.locks[op.Lock] != Unlocked {
-			panic(fmt.Printf("Tried to lock a locked lock"))
+			return Requeue
 		}
 
 		ls.locks[op.Lock] = op.Client
@@ -171,6 +192,7 @@ func Make(servers []string, me int) *LockService {
 	ls.me = me
 	ls.max = -1
 	ls.locks = make(map[int]int)
+	ls.requests = make(chan Request, 256)
 
 	rpcs := rpc.NewServer()
 	rpcs.Register(ls)
@@ -183,6 +205,8 @@ func Make(servers []string, me int) *LockService {
 		log.Fatal("listen error: ", e)
 	}
 	ls.l = l
+
+	go dequeueRequests()
 
 	go func() {
 		for ls.dead == false {
