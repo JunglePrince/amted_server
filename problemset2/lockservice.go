@@ -12,9 +12,20 @@ import "strconv"
 import "strings"
 import "time"
 
+const Debug = 1
+
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if Debug > 0 {
+		fmt.Printf(format, a...)
+	}
+	return
+}
+
 type LockService struct {
 	locks map[int]int // map lock id -> client id
 	px    *Paxos
+	max   int // The highest operation committed locally.
+	mu    sync.Mutex
 
 	l          net.Listener
 	me         int
@@ -22,10 +33,101 @@ type LockService struct {
 	unreliable bool // for testing
 }
 
+const (
+	Lock   = "Lock"
+	Unlock = "Unlock"
+)
+
+type OpType string
+
 type Op struct {
-	OpType string
-	Lock   int
+	OpType OpType
 	Client int
+	Lock   int
+}
+
+const Unlocked = -1
+
+func (ls *LockService) Lock(args *LockArgs, reply *LockReply) error {
+	myOp := Op{Lock, args.Client, args.Lock}
+	err, val = ls.getAgreement(myOp)
+	reply.Err = err
+}
+
+func (ls *LockService) Unlock(args *UnlockArgs, reply *UnlockReply) error {
+	myOp := Op{Unlock, args.Client, args.Lock}
+	err, val = ls.getAgreement(myOp)
+	reply.Err = err
+}
+
+// Gets Paxos to agree to the given operation. If other nodes have already
+// agreed on operations that have not yet been committed, then those are
+// committed before the given operation.
+// Precondition: ls.mu is locked.
+// Returns the Err string, and the previous value if it was a Put operation
+// on a key that already existed, or the value for the key if it was a Get
+// operation.
+func (ls *LockService) getAgreement(myOp Op) (Err, string) {
+	// Keep trying to propose a paxos instance until it succeeds.
+	for {
+		instance := ls.max + 1
+		ls.px.Start(instance, myOp)
+
+		to := 10 * time.Millisecond
+		// Check the Paxos status until it is decided.
+		decided, value := ls.px.Status(instance)
+		for !decided {
+			time.Sleep(to)
+			if to < 10*time.Second {
+				to *= 2
+			}
+			decided, value = ls.px.Status(instance)
+		}
+		op := value.(Op)
+
+		// Operation needs to be done regardless of whether our operation was
+		// chosen.
+		err, val := ls.commitOperation(instance, op)
+
+		// Finish when myOp was the one committed.
+		if op == myOp {
+			return err, val
+		}
+	}
+	// Should never reach here
+	panic("ls.getAgreement(): Unreachable code!")
+}
+
+func (ls *LockService) commitOperation(instance int, op Op) Err {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	if instance != ls.max+1 {
+		panic(fmt.Sprintf("Committing out of order! Expected: %v, Actual: %v\n", kv.max+1, instance))
+	}
+
+	ls.max++
+
+	if op.OpType == Lock {
+		if ls.locks[op.Lock] != Unlocked {
+			panic(fmt.Printf("Tried to lock a locked lock"))
+		}
+
+		ls.locks[op.Lock] = op.Client
+		return OK
+
+	} else if op.OpType == Unlock {
+		if ls.locks[op.Lock] == Unlocked {
+			return NotLocked
+		}
+
+		if ls.locks[op.Lock] != op.Client {
+			return NotYourLock
+		}
+
+		ls.locks[op.Lock] = Unlocked
+		return OK
+	}
 }
 
 //
@@ -67,11 +169,11 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 func Make(servers []string, me int) *LockService {
 	ls := new(LockService)
 	ls.me = me
-
+	ls.max = -1
 	ls.locks = make(map[int]int)
 
 	rpcs := rpc.NewServer()
-	rpcs.Register(kv)
+	rpcs.Register(ls)
 
 	ls.px = paxos.Make(servers, me, rpcs)
 
