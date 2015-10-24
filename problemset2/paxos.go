@@ -1,4 +1,4 @@
-package paxos
+package problemset2
 
 //
 // Paxos library, to be included in an application.
