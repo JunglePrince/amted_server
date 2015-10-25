@@ -54,8 +54,20 @@ const Unlocked = -1
 
 func (ls *LockService) Lock(args *LockArgs, reply *LockReply) error {
 	op := Op{Lock, args.Client, args.Lock}
-	reply.Err = ls.enqueueRequest(op)
-	return nil
+
+	to := 10 * time.Millisecond
+	for {
+		err := ls.enqueueRequest(op)
+		if err == Requeue {
+			time.Sleep(to)
+			if to < 1*time.Second {
+				to *= 2
+			}
+		} else {
+			reply.Err = err
+			return nil
+		}
+	}
 }
 
 func (ls *LockService) Unlock(args *UnlockArgs, reply *UnlockReply) error {
@@ -75,11 +87,7 @@ func (ls *LockService) dequeueRequests() {
 	for !ls.dead {
 		request := <-ls.requests
 		err := ls.getAgreement(request.Op)
-		if err == Requeue {
-			ls.requests <- request
-		} else {
-			request.Response <- err
-		}
+		request.Response <- err
 	}
 }
 
