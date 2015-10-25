@@ -128,6 +128,8 @@ func (ls *LockService) commitOperation(instance int, op Op) Err {
 
 	ls.max++
 
+	fmt.Printf("commitOperation(instance: %v, Op{optype: %v, client: %v, lock%v})\n", instance, op.OpType, op.Client, op.Lock)
+
 	// Initialize lock if it doesn't exist
 	if _, exists := ls.locks[op.Lock]; !exists {
 		ls.locks[op.Lock] = Unlocked

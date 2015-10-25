@@ -17,6 +17,8 @@ func main() {
 	lc := lockservice.MakeLockClient(server)
 	reader := bufio.NewReader(os.Stdin)
 
+	fmt.Printf("Client %v initialized\n", lc.ClientId)
+
 	for {
 		fmt.Printf("∆ ")
 		inputString, readErr := reader.ReadString('\n')
