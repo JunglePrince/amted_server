@@ -21,7 +21,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 type LockService struct {
-	locks    map[int]int // map lock id -> client id
+	locks    map[int]int // map lock id -> client id (or Unlocked)
 	px       *Paxos
 	max      int // The highest operation committed locally.
 	requests chan Request
@@ -37,7 +37,7 @@ type Request struct {
 	Response chan Err
 }
 
-const Requeue = "Requeue"
+const Requeue = "Requeue" // Response in Request struct to block on a lock
 
 // Op Types
 const (
@@ -53,6 +53,7 @@ type Op struct {
 	Lock   int
 }
 
+// Represents an unlocked lock.
 const Unlocked = -1
 
 func (ls *LockService) Lock(args *LockArgs, reply *LockReply) error {
@@ -128,6 +129,11 @@ func (ls *LockService) commitOperation(instance int, op Op) Err {
 	}
 
 	ls.max++
+
+	// Initialize lock if it doesn't exist
+	if _, exists := ls.locks[op.Lock]; !exists {
+		ls.locks[op.Lock] = Unlocked
+	}
 
 	if op.OpType == Lock {
 		if ls.locks[op.Lock] != Unlocked {
