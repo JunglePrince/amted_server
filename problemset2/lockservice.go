@@ -193,55 +193,27 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func Make(servers []string, me int) *LockService {
+func MakeLockService(servers []string, me int) *LockService {
 	ls := new(LockService)
 	ls.me = me
 	ls.max = -1
 	ls.locks = make(map[int]int)
 	ls.requests = make(chan Request, 256)
 
-	rpcs := rpc.NewServer()
-	rpcs.Register(ls)
-
-	ls.px = paxos.Make(servers, me, rpcs)
-
-	os.Remove(servers[me])
-	l, e := net.Listen("unix", servers[me])
-	if e != nil {
-		log.Fatal("listen error: ", e)
-	}
-	ls.l = l
-
 	go dequeueRequests()
 
-	go func() {
-		for ls.dead == false {
-			conn, err := ls.l.Accept()
-			if err == nil && ls.dead == false {
-				if ls.unreliable && (rand.Int63()%1000) < 100 {
-					// discard the request.
-					conn.Close()
-				} else if ls.unreliable && (rand.Int63()%1000) < 200 {
-					// process the request but force discard of reply.
-					c1 := conn.(*net.UnixConn)
-					f, _ := c1.File()
-					err := syscall.Shutdown(int(f.Fd()), syscall.SHUT_WR)
-					if err != nil {
-						fmt.Printf("shutdown: %v\n", err)
-					}
-					go rpcs.ServeConn(conn)
-				} else {
-					go rpcs.ServeConn(conn)
-				}
-			} else if err == nil {
-				conn.Close()
-			}
-			if err != nil && ls.dead == false {
-				fmt.Printf("LockService(%v) accept: %v\n", me, err.Error())
-				ls.kill()
-			}
-		}
-	}()
+	rpc.Register(ls)
+	ls.px = MakePaxos(servers, me)
+	rpc.HandleHTTP()
+	listener, err := net.Listen("tcp", servers[me])
+	go http.Serve(listener, nil)
 
 	return ls
+}
+
+func main() {
+	servers := os.Args[1:]
+	me := 0
+
+	LockService.Make(servers, me)
 }

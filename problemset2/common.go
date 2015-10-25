@@ -1,9 +1,10 @@
 package problemset2
 
 const (
-	OK          = "OK"
-	NotLocked   = "NotLocked"
-	NotYourLock = "NotYourLock"
+	OK                = "OK"
+	NotLocked         = "NotLocked"
+	NotYourLock       = "NotYourLock"
+	ConnectionFailure = "ConnectionFailure"
 )
 
 type Err string
