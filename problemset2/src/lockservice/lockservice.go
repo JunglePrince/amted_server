@@ -1,5 +1,6 @@
 package lockservice
 
+import "encoding/gob"
 import "fmt"
 import "net"
 import "net/rpc"
@@ -155,6 +156,8 @@ func (ls *LockService) commitOperation(instance int, op Op) Err {
 }
 
 func MakeLockService(servers []string, me int) *LockService {
+	gob.Register(Op{})
+
 	ls := new(LockService)
 	ls.me = me
 	ls.max = -1
