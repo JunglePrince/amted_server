@@ -1,14 +1,9 @@
-package problemset2
+package lockservice
 
-import "net"
 import "fmt"
+import "net"
 import "net/rpc"
-import "os"
-import "syscall"
-import "encoding/gob"
-import "math/rand"
-import "strconv"
-import "strings"
+import "net/http"
 import "time"
 
 const Debug = 1
@@ -58,27 +53,29 @@ const Unlocked = -1
 
 func (ls *LockService) Lock(args *LockArgs, reply *LockReply) error {
 	op := Op{Lock, args.Client, args.Lock}
-	reply.Err = enqueueRequest(op)
+	reply.Err = ls.enqueueRequest(op)
+	return nil
 }
 
 func (ls *LockService) Unlock(args *UnlockArgs, reply *UnlockReply) error {
 	op := Op{Unlock, args.Client, args.Lock}
-	reply.Err = enqueueRequest(op)
+	reply.Err = ls.enqueueRequest(op)
+	return nil
 }
 
 func (ls *LockService) enqueueRequest(op Op) Err {
 	response := make(chan Err)
-	request = Request{op, response}
+	request := Request{op, response}
 	ls.requests <- request
 	return <-response
 }
 
 func (ls *LockService) dequeueRequests() {
 	for !ls.dead {
-		request := <-requests
-		err := getAgreement(request.Op)
+		request := <-ls.requests
+		err := ls.getAgreement(request.Op)
 		if err == Requeue {
-			requests <- request
+			ls.requests <- request
 		} else {
 			request.Response <- err
 		}
@@ -125,7 +122,7 @@ func (ls *LockService) getAgreement(myOp Op) Err {
 
 func (ls *LockService) commitOperation(instance int, op Op) Err {
 	if instance != ls.max+1 {
-		panic(fmt.Sprintf("Committing out of order! Expected: %v, Actual: %v\n", kv.max+1, instance))
+		panic(fmt.Sprintf("Committing out of order! Expected: %v, Actual: %v\n", ls.max+1, instance))
 	}
 
 	ls.max++
@@ -141,7 +138,6 @@ func (ls *LockService) commitOperation(instance int, op Op) Err {
 		}
 
 		ls.locks[op.Lock] = op.Client
-		return OK
 
 	} else if op.OpType == Unlock {
 		if ls.locks[op.Lock] == Unlocked {
@@ -153,44 +149,9 @@ func (ls *LockService) commitOperation(instance int, op Op) Err {
 		}
 
 		ls.locks[op.Lock] = Unlocked
-		return OK
-	}
-}
-
-//
-// call() sends an RPC to the rpcname handler on server srv
-// with arguments args, waits for the reply, and leaves the
-// reply in reply. the reply argument should be a pointer
-// to a reply structure.
-//
-// the return value is true if the server responded, and false
-// if call() was not able to contact the server. in particular,
-// the replys contents are only valid if call() returned true.
-//
-// you should assume that call() will time out and return an
-// error after a while if it does not get a reply from the server.
-//
-// please use call() to send all RPCs, in client.go and server.go.
-// please do not change this function.
-//
-func call(srv string, name string, args interface{}, reply interface{}) bool {
-	c, err := rpc.Dial("unix", srv)
-	if err != nil {
-		err1 := err.(*net.OpError)
-		if err1.Err != syscall.ENOENT && err1.Err != syscall.ECONNREFUSED {
-			// fmt.Printf("paxos Dial() failed: %v\n", err1)
-		}
-		return false
-	}
-	defer c.Close()
-
-	err = c.Call(name, args, reply)
-	if err == nil {
-		return true
 	}
 
-	fmt.Println(err)
-	return false
+	return OK
 }
 
 func MakeLockService(servers []string, me int) *LockService {
@@ -200,20 +161,18 @@ func MakeLockService(servers []string, me int) *LockService {
 	ls.locks = make(map[int]int)
 	ls.requests = make(chan Request, 256)
 
-	go dequeueRequests()
+	go ls.dequeueRequests()
 
 	rpc.Register(ls)
 	ls.px = MakePaxos(servers, me)
 	rpc.HandleHTTP()
 	listener, err := net.Listen("tcp", servers[me])
-	go http.Serve(listener, nil)
+
+	if err != nil {
+		panic(err)
+	}
+
+	http.Serve(listener, nil)
 
 	return ls
-}
-
-func main() {
-	servers := os.Args[1:]
-	me := 0
-
-	LockService.Make(servers, me)
 }
