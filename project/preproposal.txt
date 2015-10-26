@@ -1,0 +1,31 @@
+Eric Zeng        0450860  ericzeng@cs.washington.edu
+Nicholas Shahan  1266066  nshahan@cs.washington.edu
+
+CSE 550 Project Preproposal
+
+One thing we've noticed while implementing and debugging distributed systems is
+that it's hard to piece together what's going on in the system just from console
+logs. For our project, we would like to implement a visual logging tool for
+distributed systems. We think the tool could be useful for debugging, or for
+helping others understand how the system works.
+
+At a high level, the tool would be a server that receives log messages from
+the nodes in the system. From the logs, the tool could construct a graphical
+view of the current state of the system. The types of logs the server could
+receive might include:
+
+  - Node registration
+  - A node's internal state
+  - Node sent a message
+  - Node received a message
+  - Message dropped
+
+From these messages, the tool could show the nodes, their current state, and
+messages in flight between nodes.
+
+The tool itself would only require basic information about the system - mainly
+the network configuration of each node. The nodes are responsible for converting
+their internal state or messages to a human readable form to display in the tool.
+
+We're planning to using the Paxos lock service from assignment 2 to test and
+demo our project.
