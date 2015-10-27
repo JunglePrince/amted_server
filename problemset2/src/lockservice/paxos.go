@@ -20,7 +20,6 @@ package lockservice
 // px.Min() int -- instances before this seq have been forgotten
 //
 
-import "net"
 import "net/rpc"
 import "sync"
 import "math"
@@ -29,7 +28,6 @@ import "math"
 
 type Paxos struct {
 	mu         sync.Mutex
-	l          net.Listener
 	dead       bool
 	peers      []string
 	me         int // index into peers[]
@@ -226,9 +224,6 @@ func (px *Paxos) Status(seq int) (bool, interface{}) {
 //
 func (px *Paxos) Kill() {
 	px.dead = true
-	if px.l != nil {
-		px.l.Close()
-	}
 }
 
 // Propose that v is the value of instance seq.
