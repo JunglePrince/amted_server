@@ -52,6 +52,8 @@ type Op struct {
 // Represents an unlocked lock.
 const Unlocked = -1
 
+// RPC Handler: Lock a given lock. Will not respond to client until the lock is
+// aquired.
 func (ls *LockService) Lock(args *LockArgs, reply *LockReply) error {
 	op := Op{Lock, args.Client, args.Lock}
 
@@ -70,12 +72,16 @@ func (ls *LockService) Lock(args *LockArgs, reply *LockReply) error {
 	}
 }
 
+// RPC Handler: Unlock a given lock. Will return an error if the lock was
+// already unlocked or if the lock is locked by another client.
 func (ls *LockService) Unlock(args *UnlockArgs, reply *UnlockReply) error {
 	op := Op{Unlock, args.Client, args.Lock}
 	reply.Err = ls.enqueueRequest(op)
 	return nil
 }
 
+// Adds the provided operation to the queue of lock operations to perform.
+// Returns the response once the opeation has completed.
 func (ls *LockService) enqueueRequest(op Op) Err {
 	response := make(chan Err)
 	request := Request{op, response}
@@ -83,6 +89,9 @@ func (ls *LockService) enqueueRequest(op Op) Err {
 	return <-response
 }
 
+// Takes lock operations from the queue and attempts to have them added to the
+// operation log. Adds the results of the operation request to the channel
+// monitored by the thread handling this RPC request.
 func (ls *LockService) dequeueRequests() {
 	for !ls.dead {
 		request := <-ls.requests
@@ -129,6 +138,7 @@ func (ls *LockService) getAgreement(myOp Op) Err {
 	panic("ls.getAgreement(): Unreachable code!")
 }
 
+// Applies the given operation to the local state at this LockService.
 func (ls *LockService) commitOperation(instance int, op Op) Err {
 	if instance != ls.max+1 {
 		panic(fmt.Sprintf("Committing out of order! Expected: %v, Actual: %v\n", ls.max+1, instance))
