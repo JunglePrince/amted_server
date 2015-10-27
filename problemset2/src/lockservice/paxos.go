@@ -31,8 +31,6 @@ type Paxos struct {
 	mu         sync.Mutex
 	l          net.Listener
 	dead       bool
-	unreliable bool
-	rpcCount   int
 	peers      []string
 	me         int // index into peers[]
 
