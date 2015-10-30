@@ -20,7 +20,6 @@ package lockservice
 // px.Min() int -- instances before this seq have been forgotten
 //
 
-import "net"
 import "net/rpc"
 import "sync"
 import "math"
@@ -29,8 +28,6 @@ import "math"
 
 type Paxos struct {
 	mu         sync.Mutex
-	l          net.Listener
-	dead       bool
 	peers      []string
 	me         int // index into peers[]
 
@@ -219,25 +216,13 @@ func (px *Paxos) Status(seq int) (bool, interface{}) {
 	return decided, val
 }
 
-//
-// tell the peer to shut itself down.
-// for testing.
-// please do not change this function.
-//
-func (px *Paxos) Kill() {
-	px.dead = true
-	if px.l != nil {
-		px.l.Close()
-	}
-}
-
 // Propose that v is the value of instance seq.
 func (px *Paxos) propose(seq int, v interface{}) {
 
 	// fmt.Printf("node%v: propose(%v,%v)\n", px.me, seq, v)
 	instance := px.instances[seq]
 	proposal := px.me
-	for instance != nil && !instance.Decided && !px.dead {
+	for instance != nil && !instance.Decided {
 		prepareQuorum, acceptVal := px.sendPrepares(seq, proposal)
 
 		if !prepareQuorum {
