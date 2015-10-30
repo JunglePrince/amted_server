@@ -17,7 +17,11 @@ func main() {
 	lc := lockservice.MakeLockClient(server)
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Printf("Client %v initialized\n", lc.ClientId)
+	fmt.Printf("\nClient %v initialized\n", lc.ClientId)
+	fmt.Printf("Available Commands:\n")
+	fmt.Printf("  lock <id>\n")
+	fmt.Printf("  unlock <id>\n")
+	fmt.Printf("  quit\n\n")
 
 	for {
 		fmt.Printf("∆ ")
@@ -27,10 +31,16 @@ func main() {
 		}
 
 		inputString = strings.Trim(inputString, "\n")
+
+		if strings.ToLower(inputString) == "quit" {
+			return
+		}
+
 		inputs := strings.Split(inputString, " ")
 
 		if len(inputs) != 2 {
-			fmt.Printf("Bad command.\n")
+			fmt.Printf("Not a valid command.\n")
+			continue
 		}
 
 		command := strings.ToLower(inputs[0])
@@ -42,10 +52,8 @@ func main() {
 			fmt.Printf("%v\n", lc.Lock(lockId))
 		} else if command == "unlock" {
 			fmt.Printf("%v\n", lc.Unlock(lockId))
-		} else if command == "quit" {
-			return
 		} else {
-			fmt.Printf("Bad command.\n")
+			fmt.Printf("Not a valid command.\n")
 		}
 	}
 }
