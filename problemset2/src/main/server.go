@@ -14,6 +14,12 @@ func main() {
 	servers := os.Args[1 : len(os.Args)-1]
 	me, err := strconv.Atoi(os.Args[len(os.Args)-1])
 
+	if me < 0 || me >= len(servers) {
+		printUsage()
+		fmt.Printf("ERROR: \"me\" must be between 0 and %d.\n", len(servers))
+		return
+	}
+
 	if err != nil {
 		printUsage()
 		fmt.Printf("ERROR: Last argument must be an index that identifies this server.\n")

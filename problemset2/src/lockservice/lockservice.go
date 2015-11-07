@@ -19,13 +19,10 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 type LockService struct {
 	locks    map[int]int // map lock id -> client id (or Unlocked)
 	px       *Paxos
-	max      int // The highest operation committed locally.
+	max      int // The highest instance committed locally.
 	requests chan Request
-
-	l          net.Listener
-	me         int
-	dead       bool // for testing
-	unreliable bool // for testing
+	servers  []string
+	me       int
 }
 
 type Request struct {
@@ -93,7 +90,7 @@ func (ls *LockService) enqueueRequest(op Op) Err {
 // operation log. Adds the results of the operation request to the channel
 // monitored by the thread handling this RPC request.
 func (ls *LockService) dequeueRequests() {
-	for !ls.dead {
+	for {
 		request := <-ls.requests
 		err := ls.getAgreement(request.Op)
 		request.Response <- err
@@ -180,6 +177,7 @@ func MakeLockService(servers []string, me int) *LockService {
 
 	ls := new(LockService)
 	ls.me = me
+	ls.servers = servers
 	ls.max = -1
 	ls.locks = make(map[int]int)
 	ls.requests = make(chan Request, 256)
