@@ -1,0 +1,40 @@
+// message from client, tell it that we know of no leader
+
+[INFO] [11/06/2015 10:39:45.644] [new-system-0-akka.actor.default-dispatcher-5] [akka://new-system-0/user/raft-member-3] Candidate got ClientMessage(Actor[akka://new-system-0/deadLetters],AppendWord(51)) from client; Respond with anarchy - there is no leader.
+
+
+// election
+(no example of this message!)
+log.warning("Tried to initialize election with no members...")
+
+[INFO] [11/06/2015 10:39:45.691] [new-system-0-akka.actor.default-dispatcher-4] [akka://new-system-0/user/raft-member-1] Initializing election (among 4 nodes) for Term(2)
+
+[INFO] [11/06/2015 10:39:45.735] [new-system-0-akka.actor.default-dispatcher-4] [akka://new-system-0/user/raft-member-2] Rejecting RequestVote msg by Actor[akka://new-system-0/user/raft-member-4#539925308] in Term(4). Received stale Term(2).
+
+(two cases print this message!)
+[INFO] [11/06/2015 10:39:45.741] [new-system-0-akka.actor.default-dispatcher-3] [akka://new-system-0/user/raft-member-4] Received newer Term(4). Current term is Term(2). Revert to follower state.
+
+[INFO] [11/06/2015 10:39:45.743] [new-system-0-akka.actor.default-dispatcher-3] [akka://new-system-0/user/raft-member-4] Voting for Actor[akka://new-system-0/user/raft-member-2#-1281075254] in Term(4)
+
+[INFO] [11/06/2015 10:39:45.744] [new-system-0-akka.actor.default-dispatcher-4] [akka://new-system-0/user/raft-member-2] Rejecting RequestVote msg by Actor[akka://new-system-0/user/raft-member-4#539925308] in Term(4). Received stale Term(2).
+
+[INFO] [11/06/2015 10:39:45.782] [new-system-0-akka.actor.default-dispatcher-2] [akka://new-system-0/user/raft-member-1] Rejecting VoteCandidate msg by Actor[akka://new-system-0/user/raft-member-4#539925308] in Term(10). Received stale Term(7).
+
+[INFO] [11/06/2015 10:39:45.783] [new-system-0-akka.actor.default-dispatcher-2] [akka://new-system-0/user/raft-member-4] Received newer Term(10). Current term is Term(7). Revert to follower state.
+
+[INFO] [11/06/2015 10:39:45.896] [new-system-0-akka.actor.default-dispatcher-2] [akka://new-system-0/user/raft-member-3] Received vote by Actor[akka://new-system-0/user/raft-member-2#-1281075254]; Won election with Set(raft-member-3, raft-member-4, raft-member-2) of 4 votes
+
+[INFO] [11/06/2015 10:39:45.910] [new-system-0-akka.actor.default-dispatcher-2] [akka://new-system-0/user/raft-member-1] Received vote by Actor[akka://new-system-0/user/raft-member-4#539925308]; Have Set(raft-member-1, raft-member-4) of 4 votes
+
+(no example of this logged message!)
+log.info("Candidate is declined by {} in term {}", sender(), m.currentTerm)
+
+// end of election
+// handle appends
+
+// ending election due to timeout
+[INFO] [11/06/2015 10:39:46.944] [new-system-2-akka.actor.default-dispatcher-15] [akka://new-system-2/user/raft-member-1] Voting timeout, starting a new election (among 4)...
+
+// would like to start election, but I'm all alone! ;-(
+(no example of this logged message!)
+log.info("Voting timeout, unable to start election, don't know enough nodes (members: {})...", m.config.members.size)
