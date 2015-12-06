@@ -1,0 +1,51 @@
+Eric Zeng        0450860  ericzeng@cs.washington.edu
+Nicholas Shahan  1266066  nshahan@cs.washington.edu
+CSE 550
+Checkpoint 2
+
+Since the last checkpoint, we have made good progress towards integrating
+DEMi and Synoptic, and coming up with new strategies for minimizing executions.
+
+After a few chats with Colin, he helped us understand the specifics of how DEMi
+works, and he wrote a few pieces of starter code in DEMi where our minimization
+strategy will live. Then, we started looking at the Synoptic codebase, and were
+able to find an API that allows us to programmatically feed in log files and
+generate state machine graphs. Luckily for us, it was not very difficult to make
+the two projects interoperate, since both run on JVM languages. We added code
+to call the Synoptic JAR from inside DEMi, and then more code to parse the
+dot graph files produced by DEMi.
+
+Next, we started looking at how to actually make sense of the information that
+we get from DEMi and Synoptic. DEMi provides us with a list of the Events which
+caused an invariant violation, i.e. the external inputs given to the system
+under test. Synoptic provides us with different information entirely - it
+provides us with a state machine graph constructed from the internal state of
+the system under test. The best way to make sense of this is that if the system
+is a graph, the states are nodes and each event is an edge. The entire event
+trace is a path through the graph, from the start to the invariant violation.
+
+Colin provided a bit more code to help with this - he modified DEMi to provide
+a table that associates events with the log messages (states) that they caused.
+Once we had this mapping, we were able to write some graph traversal code. This
+code helps us trace a path through the Synoptic state machine given a DEMi
+event trace.
+
+Now, we are thinking about how to implement a minimization strategy. The
+Synoptic abstraction is nice because we think we can reduce the strategy into
+a graph search problem. For example, we might find a cycle in the event trace
+path, and we can try to remove the cycle. Another possible approach is to
+ignore the trace altogether, and try to find the shortest path from the
+beginning to the invariant violation.
+
+One complication we've come across during our work is that there isn't always
+a nice mapping between events, logs, edges, and states. For example, sometimes
+one event will trigger multiple logs to be outputted by the system. This makes
+it harder to traverse the graph, since not every edge can be labeled by an
+event. Another issue we had was that Synoptic sometimes produces nodes with
+duplicate labels. While each node has unique ids, given a log message it is
+impossible to determine which node represents it, unless you are traversing
+the graph and know the previous node.
+
+In general, we have made good progress in implementing the infrastructure
+necessary for our original goal. Now all we have to do is find out of any of
+the new minimization strategies we thought about will actually work.
